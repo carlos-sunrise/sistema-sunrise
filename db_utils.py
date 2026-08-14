@@ -80,7 +80,17 @@ def inicializar_db():
             cliente VARCHAR(150)
         ) {charset_config}
     """)
-    
+    # 6. NUEVA: Tabla de Usuarios para el Login
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(50) NOT NULL UNIQUE,
+            password_hash VARCHAR(255) NOT NULL,
+            nombre VARCHAR(100) NOT NULL,
+            rol VARCHAR(20) DEFAULT 'usuario',
+            activo BOOLEAN DEFAULT TRUE
+        ) {charset_config}
+    """)
     conn.commit()
     cursor.close()
     conn.close()
