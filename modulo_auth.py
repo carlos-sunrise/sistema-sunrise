@@ -76,3 +76,51 @@ def render_login():
                         st.rerun()
                     else:
                         st.error("Usuario o contraseña incorrectos.")
+
+# --- FUNCIONES DE GESTIÓN DE USUARIOS ---
+
+def crear_usuario(username, password, nombre, rol='usuario'):
+    """Crea un nuevo usuario en la base de datos."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        pwd_hash = hash_password(password)
+        
+        query = "INSERT INTO usuarios (username, password_hash, nombre, rol) VALUES (%s, %s, %s, %s)"
+        cursor.execute(query, (username, pwd_hash, nombre, rol))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True, "✅ Usuario creado exitosamente."
+    except Exception as e:
+        if "Duplicate entry" in str(e) or "1062" in str(e):
+            return False, "⚠️ El nombre de usuario ya existe."
+        return False, f"❌ Error al crear usuario: {e}"
+
+def obtener_lista_usuarios():
+    """Retorna todos los usuarios registrados."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, username, nombre, rol, activo FROM usuarios ORDER BY id DESC")
+        usuarios = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return usuarios
+    except Exception as e:
+        print(f"Error al obtener usuarios: {e}")
+        return []
+
+def cambiar_estado_usuario(user_id, nuevo_estado):
+    """Activa o desactiva un usuario."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET activo = %s WHERE id = %s", (nuevo_estado, user_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error al cambiar estado: {e}")
+        return False

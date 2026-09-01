@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from db_utils import get_connection, obtener_lista_sedes, obtener_lista_proveedores, obtener_lista_tipos
+from modulo_auth import crear_usuario, obtener_lista_usuarios, cambiar_estado_usuario  # 🔐 Importación de gestión de usuarios
 import time
 
 def render():
@@ -11,12 +12,13 @@ def render():
     if "v_provs" not in st.session_state: st.session_state["v_provs"] = 0
     if "v_tipos" not in st.session_state: st.session_state["v_tipos"] = 0
 
-    # 🔧 MODIFICACIÓN: Añadimos la pestaña de Auditoría al bloque principal de pestañas
-    tab_sedes, tab_provs, tab_tipos, tab_auditoria = st.tabs([
+    # 🔧 MODIFICACIÓN: Añadimos la pestaña de Usuarios al bloque principal
+    tab_sedes, tab_provs, tab_tipos, tab_auditoria, tab_usuarios = st.tabs([
         "📍 Sedes", 
         "🏢 Proveedores", 
         "📦 Tipos de Equipo", 
-        "🔍 Historial de Movimientos"
+        "🔍 Historial de Movimientos",
+        "👥 Usuarios"
     ])
 
     # --- TAB: SEDES ---
@@ -119,7 +121,7 @@ def render():
                     time.sleep(1.2)
                     st.rerun()
 
-    # --- 🔍 TAB NUEVA: AUDITORÍA DE USUARIOS ---
+    # --- TAB: AUDITORÍA DE USUARIOS ---
     with tab_auditoria:
         st.subheader("📋 Registro de Actividad de Usuarios")
         st.write("Seguimiento en tiempo real de reservas, compras e ingresos físicos de mercadería.")
@@ -128,7 +130,6 @@ def render():
         with st.container(border=True):
             cf1, cf2, cf3 = st.columns(3)
             
-            # Consultamos los usuarios que ya tienen registros para armar el desplegable dinámico
             try:
                 df_usuarios_db = pd.read_sql("SELECT DISTINCT usuario FROM log_auditoria", conn)
                 usuarios_disponibles = ["Todos"] + df_usuarios_db["usuario"].tolist()
@@ -144,7 +145,6 @@ def render():
             ])
             buscar_obra = cf3.text_input("🏢 Buscar Cliente / Remito:", placeholder="Escribí para buscar...", autocomplete="off")
 
-        # Construcción dinámica de la query de lectura con filtros
         query_log = "SELECT fecha_hora, usuario, accion, detalles, cliente FROM log_auditoria WHERE 1=1"
         parametros = []
         
@@ -160,7 +160,7 @@ def render():
             query_log += " AND cliente LIKE ?"
             parametros.append(f"%{buscar_obra}%")
             
-        query_log += " ORDER BY id DESC"  # Ordenamos para ver lo más reciente arriba de todo
+        query_log += " ORDER BY id DESC"
 
         try:
             df_logs = pd.read_sql(query_log, conn, params=parametros)
@@ -168,7 +168,6 @@ def render():
             if df_logs.empty:
                 st.info("No se registran movimientos que coincidan con los filtros aplicados.")
             else:
-                # Estilizado y renombramiento de columnas para la tabla visual
                 df_logs.columns = ["Fecha / Hora", "Usuario", "Operación", "Detalle Detallado", "Referencia / Cliente"]
                 
                 st.dataframe(
@@ -185,5 +184,55 @@ def render():
                 )
         except Exception as e:
             st.error(f"No se pudo cargar el historial de auditoría: {e}")
+
+    # --- 👥 TAB NUEVA: GESTIÓN DE USUARIOS ---
+    with tab_usuarios:
+        st.subheader("👥 Gestión de Usuarios del Sistema")
+        
+        usuario_actual = st.session_state.get('usuario', {})
+        
+        if usuario_actual.get('rol') != 'admin':
+            st.warning("🔒 Solo los administradores pueden gestionar usuarios.")
+        else:
+            with st.expander("➕ Crear Nuevo Usuario", expanded=False):
+                with st.form("form_nuevo_usuario"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        nuevo_user = st.text_input("Usuario (Login)")
+                        nuevo_nombre = st.text_input("Nombre Completo")
+                    with col2:
+                        nueva_pass = st.text_input("Contraseña", type="password")
+                        nuevo_rol = st.selectbox("Rol", ["usuario", "admin"])
+                    
+                    btn_crear = st.form_submit_button("Guardar Usuario", use_container_width=True)
+                    
+                    if btn_crear:
+                        if not nuevo_user or not nueva_pass or not nuevo_nombre:
+                            st.warning("Por favor completa todos los campos.")
+                        else:
+                            exito, mensaje = crear_usuario(nuevo_user, nueva_pass, nuevo_nombre, nuevo_rol)
+                            if exito:
+                                st.success(mensaje)
+                                time.sleep(1.2)
+                                st.rerun()
+                            else:
+                                st.error(mensaje)
+
+            st.write("#### Usuarios Registrados")
+            lista = obtener_lista_usuarios()
+            
+            if lista:
+                for u in lista:
+                    col_info, col_btn = st.columns([3, 1])
+                    with col_info:
+                        estado_icon = "🟢" if u['activo'] else "🔴"
+                        st.write(f"{estado_icon} **{u['nombre']}** (`{u['username']}`) - Rol: *{u['rol']}*")
+                    with col_btn:
+                        if u['username'] != usuario_actual.get('username'):
+                            btn_txt = "Desactivar" if u['activo'] else "Activar"
+                            if st.button(btn_txt, key=f"btn_user_{u['id']}"):
+                                cambiar_estado_usuario(u['id'], not u['activo'])
+                                st.rerun()
+                    st.divider()
 
     conn.close()

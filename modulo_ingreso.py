@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from db_utils import get_connection, obtener_lista_sedes, obtener_lista_proveedores, obtener_lista_tipos, registrar_accion  # 📜 Importamos la función de auditoría
+from db_utils import get_connection, obtener_lista_sedes, obtener_lista_proveedores, obtener_lista_tipos, registrar_accion
 from datetime import datetime
 
 def render():
@@ -18,22 +18,28 @@ def render():
     if 'remito_fijo' not in st.session_state: st.session_state['remito_fijo'] = ""
     if 'proveedor_fijo' not in st.session_state: st.session_state['proveedor_fijo'] = "Seleccione..."
     
-    # 👤 PASO PREVIO MULTIUSUARIO: Resguardo de sesión administrativa
     if 'usuario_actual' not in st.session_state: 
         st.session_state['usuario_actual'] = "Carlos (Administrador)"
 
-    # Cargamos el catálogo completo para filtrar
+    # Cargamos el catálogo
     conn_view = get_connection()
     prods_db = pd.read_sql("SELECT id, tipo, marca, modelo, proveedor FROM productos", conn_view)
     conn_view.close()
 
+    # Sanitizamos cadenas de texto limpiando espacios vacíos
+    prods_db['proveedor'] = prods_db['proveedor'].fillna('').astype(str).str.strip()
+    prods_db['tipo'] = prods_db['tipo'].fillna('').astype(str).str.strip()
+    prods_db['marca'] = prods_db['marca'].fillna('').astype(str).str.strip()
+    prods_db['modelo'] = prods_db['modelo'].fillna('').astype(str).str.strip()
+
+    prov_busqueda = st.session_state.proveedor_fijo.strip()
+
     # --- CALLBACKS ---
     def callback_agregar():
         if st.session_state.ingreso_prod != "Seleccione..." and st.session_state.remito_fijo != "":
-            # Filtro por aproximación para celdas combinadas
             filt = prods_db[
                 (prods_db['tipo'] == st.session_state.ingreso_tipo) & 
-                (prods_db['proveedor'].str.contains(st.session_state.proveedor_fijo, case=False, na=False))
+                (prods_db['proveedor'].str.lower().str.contains(prov_busqueda.lower(), regex=False))
             ]
             opciones = {f"{r['marca']} {r['modelo']}": r['id'] for _, r in filt.iterrows()}
             p_id = opciones.get(st.session_state.ingreso_prod)
@@ -54,22 +60,19 @@ def render():
     def callback_confirmar_total():
         if not st.session_state['lista_remito_temporal']: return
         conn_save = get_connection()
+        cursor = conn_save.cursor()
         
-        # CAPTURA DE FECHA SELECCIONADA POR EL USUARIO MANUALMENTE
         fecha_seleccionada = st.session_state.fecha_remito_manual.strftime("%Y-%m-%d %H:%M:%S")
         
         try:
             for item in st.session_state['lista_remito_temporal']:
-                # Base de la nota descriptiva estándar para remitos locales directos
                 info_nota = f"Remito: {st.session_state.remito_fijo} | Prov: {st.session_state.proveedor_fijo}"
                 
-                # 🛠️ Suma directa de stock real en la sede destino sin tags de despachos.
-                conn_save.execute("""
+                cursor.execute("""
                     INSERT INTO movimientos (producto_id, cantidad, fecha, asignacion, nota) 
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s)
                 """, (item['id'], item['Cantidad'], fecha_seleccionada, item['Destino'], info_nota))
                 
-                # 📜 LOG: Ingreso de stock por recepción de remito
                 registrar_accion(
                     conn=conn_save,
                     usuario=st.session_state['usuario_actual'],
@@ -79,9 +82,9 @@ def render():
                     cliente=st.session_state.remito_fijo
                 )
             
-            conn_save.execute("""
+            cursor.execute("""
                 INSERT INTO historial_remitos (nro_remito, proveedor, fecha, cantidad_items) 
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
             """, (st.session_state.remito_fijo, st.session_state.proveedor_fijo, fecha_seleccionada, len(st.session_state['lista_remito_temporal'])))
             
             conn_save.commit()
@@ -92,6 +95,7 @@ def render():
         except Exception as e: 
             st.error(f"Error: {e}")
         finally: 
+            cursor.close()
             conn_save.close()
 
     # --- INTERFAZ ---
@@ -109,18 +113,24 @@ def render():
         with st.container(border=True):
             col_t1, col_t2 = st.columns(2)
             with col_t1:
-                if st.session_state.proveedor_fijo != "Seleccione...":
-                    df_prov_filtrado = prods_db[prods_db['proveedor'].str.contains(st.session_state.proveedor_fijo, case=False, na=False)]
+                if prov_busqueda != "Seleccione...":
+                    # Filtrado flexible sin importar mayúsculas/minúsculas ni espacios
+                    df_prov_filtrado = prods_db[prods_db['proveedor'].str.lower().str.contains(prov_busqueda.lower(), regex=False)]
                     tipos_filtrados = sorted(df_prov_filtrado['tipo'].unique().tolist())
-                    st.selectbox("Seleccionar Tipo:", ["Seleccione..."] + tipos_filtrados, key="ingreso_tipo")
+                    
+                    if tipos_filtrados:
+                        st.selectbox("Seleccionar Tipo:", ["Seleccione..."] + tipos_filtrados, key="ingreso_tipo")
+                    else:
+                        st.warning("⚠️ Sin productos asignados a este proveedor en el catálogo.")
+                        st.selectbox("Seleccionar Tipo:", ["Seleccione..."], disabled=True, key="ingreso_tipo_dis")
                 else: 
                     st.selectbox("Seleccionar Tipo:", ["Seleccione..."], disabled=True, key="ingreso_tipo_dis")
             
             with col_t2:
-                if st.session_state.ingreso_tipo != "Seleccione..." and st.session_state.proveedor_fijo != "Seleccione...":
+                if st.session_state.ingreso_tipo != "Seleccione..." and prov_busqueda != "Seleccione...":
                     filt = prods_db[
                         (prods_db['tipo'] == st.session_state.ingreso_tipo) & 
-                        (prods_db['proveedor'].str.contains(st.session_state.proveedor_fijo, case=False, na=False))
+                        (prods_db['proveedor'].str.lower().str.contains(prov_busqueda.lower(), regex=False))
                     ]
                     opciones_prod = sorted([f"{r['marca']} {r['modelo']}" for _, r in filt.iterrows()])
                     st.selectbox("Seleccionar Producto:", ["Seleccione..."] + opciones_prod, key="ingreso_prod")
@@ -173,13 +183,13 @@ def render():
                         with st.container(border=True):
                             st.markdown(f"### 📦 DETALLE DESPLEGADO: Remito `{remito_sel}`")
                             
-                            query_detalle = f"""
-                                SELECT m.cantidad, m.asignacion as destino, p.marca || ' ' || p.modelo as articulo
+                            query_detalle = """
+                                SELECT m.cantidad, m.asignacion as destino, CONCAT(p.marca, ' ', p.modelo) as articulo
                                 FROM movimientos m
                                 JOIN productos p ON m.producto_id = p.id
-                                WHERE m.nota LIKE 'Remito: {remito_sel} | %'
+                                WHERE m.nota LIKE %s
                             """
-                            df_detalle = pd.read_sql(query_detalle, conn_hist)
+                            df_detalle = pd.read_sql(query_detalle, conn_hist, params=(f"Remito: {remito_sel} | %%",))
                             st.dataframe(df_detalle, use_container_width=True, hide_index=True)
                             
                             col_act1, col_act2, col_act3 = st.columns([2, 1.2, 1])
@@ -188,11 +198,11 @@ def render():
                                 nuevo_nro = st.text_input("Nro Remito:", value=str(remito_sel))
                                 nuevo_prov = st.selectbox("Proveedor:", lista_provs, index=lista_provs.index(proveedor_sel) if proveedor_sel in lista_provs else 0)
                                 if st.button("Guardar Cambios", key=f"save_rem_{remito_sel}", type="primary", use_container_width=True):
-                                    conn_hist.execute("UPDATE historial_remitos SET nro_remito = ?, proveedor = ? WHERE nro_remito = ?", (nuevo_nro, nuevo_prov, str(remito_sel)))
+                                    cursor_hist = conn_hist.cursor()
+                                    cursor_hist.execute("UPDATE historial_remitos SET nro_remito = %s, proveedor = %s WHERE nro_remito = %s", (nuevo_nro, nuevo_prov, str(remito_sel)))
                                     nueva_nota_mov = f"Remito: {nuevo_nro} | Prov: {nuevo_prov}"
-                                    conn_hist.execute("UPDATE movimientos SET nota = ? WHERE nota LIKE ?", (nueva_nota_mov, f"Remito: {remito_sel} | %"))
+                                    cursor_hist.execute("UPDATE movimientos SET nota = %s WHERE nota LIKE %s", (nueva_nota_mov, f"Remito: {remito_sel} | %%"))
                                     
-                                    # 📜 LOG: Modificación de encabezado de remito
                                     registrar_accion(
                                         conn=conn_hist,
                                         usuario=st.session_state['usuario_actual'],
@@ -202,14 +212,15 @@ def render():
                                     )
                                     
                                     conn_hist.commit()
+                                    cursor_hist.close()
                                     st.success("Cambios aplicados.")
                                     st.rerun()
 
                             if col_act3.button("🗑️ Anular", key=f"del_rem_{remito_sel}", type="secondary", use_container_width=True):
-                                conn_hist.execute("DELETE FROM movimientos WHERE nota LIKE ?", (f"Remito: {remito_sel} | %",))
-                                conn_hist.execute("DELETE FROM historial_remitos WHERE nro_remito = ?", (str(remito_sel),))
+                                cursor_hist = conn_hist.cursor()
+                                cursor_hist.execute("DELETE FROM movimientos WHERE nota LIKE %s", (f"Remito: {remito_sel} | %%",))
+                                cursor_hist.execute("DELETE FROM historial_remitos WHERE nro_remito = %s", (str(remito_sel),))
                                 
-                                # 📜 LOG: Anulación completa de remito
                                 registrar_accion(
                                     conn=conn_hist,
                                     usuario=st.session_state['usuario_actual'],
@@ -219,6 +230,7 @@ def render():
                                 )
                                 
                                 conn_hist.commit()
+                                cursor_hist.close()
                                 st.error(f"Remito {remito_sel} anulado.")
                                 st.rerun()
                                 

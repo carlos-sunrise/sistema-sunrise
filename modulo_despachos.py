@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 from db_utils import get_connection, obtener_lista_sedes
 from datetime import datetime
-import re  # 💡 Importamos Regex para un parseo infalible de texto
+import re
 
 def render():
     st.header("📦 Módulo de Gestión de Despachos (Inter-Sedes)")
     conn = get_connection()
     lista_sedes = obtener_lista_sedes()
 
-    # --- CONTROL DE PESTAÑAS INTERNAS REESTRUCTURADO (DOS ESTADOS) ---
+    # --- CONTROL DE PESTAÑAS INTERNAS ---
     if "pestana_despachos" not in st.session_state:
         st.session_state["pestana_despachos"] = "🟡 Por Despachar"
 
@@ -29,7 +29,7 @@ def render():
                m.nota, m.asignacion as sede_destino, m.fecha
         FROM movimientos m
         JOIN productos p ON m.producto_id = p.id
-        WHERE m.nota LIKE '%Despacho:%'
+        WHERE m.nota LIKE '%%Despacho:%%'
         ORDER BY m.fecha DESC
     """
     df_db = pd.read_sql(query_despachos, conn)
@@ -39,7 +39,7 @@ def render():
         for _, r in df_db.iterrows():
             nota_c = r['nota']
             
-            # Clasificación simplificada según las nuevas especificaciones
+            # 🎯 REGLA ESTRICTA DE ESTADO: Solo está 'Listo en Galpón' si fue RECIBIDO previamente
             if "Despacho: PENDIENTE" in nota_c:
                 if " | RECIBIDO" in nota_c:
                     estado_desp = "Listo en Galpón"
@@ -50,12 +50,12 @@ def render():
             else:
                 continue
 
-            # Parseo Regex ultra-seguro para extraer las unidades
+            # Parseo seguro para extraer la cantidad
             match_cant = re.search(r'(?:F:|Cant:|Cantidad:)\s*(\d+)', nota_c, re.IGNORECASE)
             cant_val = int(match_cant.group(1)) if match_cant and int(match_cant.group(1)) != 0 else 1
 
             try:
-                if "Compra Directa:" in nota_c:
+                if "Compra Directa: " in nota_c:
                     detalle_origen = nota_c.split("Compra Directa: ")[1].split(" | ")[0]
                 else:
                     detalle_origen = nota_c.split("Reserva: ")[1].split(" | ")[0]
@@ -77,7 +77,7 @@ def render():
     df_despachos = pd.DataFrame(listado_despachos) if listado_despachos else pd.DataFrame(columns=['id_mov_origen', 'producto_id', 'equipo', 'cantidad', 'sede_destino', 'fecha_carga', 'estado', 'detalle', 'nota_completa'])
 
     # ====================================================
-    # 🟡 PESTAÑA 1: POR DESPACHAR
+    # 🟡 PESTAÑA 1: POR DESPACHAR (AGRUPADO POR CLIENTE / OBRA)
     # ====================================================
     if st.session_state["pestana_despachos"] == "🟡 Por Despachar":
         df_prep = df_despachos[df_despachos['estado'].isin(["Listo en Galpón", "Por recibir"])]
@@ -85,32 +85,37 @@ def render():
         if df_prep.empty:
             st.success("🎉 ¡No tenés mercadería pendiente de despacho para Formosa o Bolívar!")
         else:
-            for _, item in df_prep.iterrows():
+            for cliente_desp in df_prep['detalle'].unique():
+                df_cli_desp = df_prep[df_prep['detalle'] == cliente_desp]
+                destino_cli = df_cli_desp.iloc[0]['sede_destino']
+                
                 with st.container(border=True):
-                    col1, col2, col3 = st.columns([2.5, 1.5, 1.3])
-                    col1.markdown(f"**📦 {item['equipo']}**")
-                    col1.write(f"📝 {item['detalle']} | 📅 Carga: {item['fecha_carga']}")
+                    st.markdown(f"#### 👤 Cliente / Obra: **{cliente_desp}** | 📍 Destino: :blue[**{destino_cli}**]")
+                    st.write("---")
                     
-                    if item['estado'] == "Por recibir":
-                        col2.markdown(f"🔢 Cantidad: **{item['cantidad']}** (⚠️ :orange[**Por recibir en Galpón**])")
-                        boton_deshabilitado = True
-                    else:
-                        col2.markdown(f"🔢 Cantidad: **{item['cantidad']}** (✅ :green[**Listo en Galpón**])")
-                        boton_deshabilitado = False
+                    for _, item in df_cli_desp.iterrows():
+                        col1, col2, col3 = st.columns([2.5, 1.5, 1.3])
+                        col1.markdown(f"📦 **{item['equipo']}**")
+                        col1.write(f"📅 Carga: {item['fecha_carga']}")
                         
-                    col2.markdown(f"📍 Destino: :blue[**{item['sede_destino']}**]")
-                    
-                    if col3.button("🚀 Despachar", key=f"btn_go_{item['id_mov_origen']}", type="primary", use_container_width=True, disabled=boton_deshabilitado):
-                        # Al despachar mutamos el estado a ENVIADO para que pase directo al historial.
-                        # No alteramos cantidades; el inventario de la sede esperará al proceso de remito posterior.
-                        nueva_nota_origen = item['nota_completa'].replace("Despacho: PENDIENTE", "Despacho: ENVIADO") + f" | F.Despacho: {datetime.now().strftime('%Y-%m-%d')}"
-                        conn.execute("UPDATE movimientos SET nota = ? WHERE id = ?", (nueva_nota_origen, item['id_mov_origen']))
-                        conn.commit()
-                        st.toast(f"¡Artículo despachado correctamente hacia {item['sede_destino']}!", icon="🚀")
-                        st.rerun()
+                        if item['estado'] == "Por recibir":
+                            col2.markdown(f"🔢 Cantidad: **{item['cantidad']}** (⚠️ :orange[**Por recibir en Galpón**])")
+                            boton_deshabilitado = True
+                        else:
+                            col2.markdown(f"🔢 Cantidad: **{item['cantidad']}** (✅ :green[**Listo en Galpón**])")
+                            boton_deshabilitado = False
+                            
+                        if col3.button("🚀 Despachar", key=f"btn_go_{item['id_mov_origen']}", type="primary", use_container_width=True, disabled=boton_deshabilitado):
+                            nueva_nota_origen = item['nota_completa'].replace("Despacho: PENDIENTE", "Despacho: ENVIADO") + f" | F.Despacho: {datetime.now().strftime('%Y-%m-%d')}"
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE movimientos SET nota = %s WHERE id = %s", (nueva_nota_origen, item['id_mov_origen']))
+                            conn.commit()
+                            cursor.close()
+                            st.toast(f"¡Artículo despachado correctamente hacia {item['sede_destino']}!", icon="🚀")
+                            st.rerun()
 
     # ====================================================
-    # 🟢 PESTAÑA 2: DESPACHADO (HISTORIAL)
+    # 🟢 PESTAÑA 2: DESPACHADO (HISTORIAL CERRADO)
     # ====================================================
     if st.session_state["pestana_despachos"] == "🟢 Despachado":
         df_enviados = df_despachos[df_despachos['estado'] == "Despachado"]

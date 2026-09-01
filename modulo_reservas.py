@@ -14,11 +14,9 @@ def render():
     if 'mostrar_historico' not in st.session_state: st.session_state.mostrar_historico = False
     if 'mostrar_activas' not in st.session_state: st.session_state.mostrar_activas = True
     
-    # 👤 PASO PREVIO MULTIUSUARIO: Definimos tu sesión actual por defecto
     if 'usuario_actual' not in st.session_state: 
         st.session_state['usuario_actual'] = "Carlos (Administrador)"
     
-    # 🔐 Registro temporal de etiquetas impresas en la sesión actual
     if 'etiquetas_impresas' not in st.session_state: st.session_state['etiquetas_impresas'] = set()
 
     sedes_db = obtener_lista_sedes()
@@ -60,8 +58,8 @@ def render():
                                    SUM(m.cantidad) as disponible
                             FROM productos p
                             JOIN movimientos m ON p.id = m.producto_id
-                            WHERE m.asignacion = ?
-                            GROUP BY p.id, p.proveedor
+                            WHERE m.asignacion = %s
+                            GROUP BY p.id, p.tipo, p.marca, p.modelo, p.proveedor
                             HAVING disponible > 0
                             ORDER BY p.tipo ASC
                         """
@@ -112,7 +110,7 @@ def render():
                             m_parts = prod_f.split(" ")
                             marca_m = m_parts[0]
                             modelo_m = " ".join(m_parts[1:])
-                            id_gen_row = pd.read_sql("SELECT id FROM productos WHERE tipo=? AND marca=? AND modelo=? LIMIT 1",
+                            id_gen_row = pd.read_sql("SELECT id FROM productos WHERE tipo=%s AND marca=%s AND modelo=%s LIMIT 1",
                                                    conn, params=(tipo_f, marca_m, modelo_m))
                             
                             if not id_gen_row.empty:
@@ -123,10 +121,10 @@ def render():
                                 else:
                                     nota_f = f"Reserva: {f_cliente} ({f_asignado}) | F: {int(cant_f)} | Despacho: PENDIENTE | Cantidad: {int(cant_f)}"
                                 
-                                conn.execute("INSERT INTO movimientos (producto_id, quantity, fecha, asignacion, nota) VALUES (?, 0, ?, ?, ?)",
+                                cursor = conn.cursor()
+                                cursor.execute("INSERT INTO movimientos (producto_id, cantidad, fecha, asignacion, nota) VALUES (%s, 0, %s, %s, %s)",
                                              (int(id_gen), datetime.now().strftime("%Y-%m-%d"), f_asignado, nota_f))
                                 
-                                # 📜 LOG: Faltante solicitado
                                 registrar_accion(
                                     conn=conn,
                                     usuario=st.session_state['usuario_actual'],
@@ -135,13 +133,14 @@ def render():
                                     producto_id=int(id_gen),
                                     cliente=f_cliente
                                 )
-                                conn.commit(); st.rerun()
+                                conn.commit()
+                                cursor.close()
+                                st.rerun()
 
-                # --- VISTA PREVIA DEL FORMULARIO ---
                 df_faltantes_temp = pd.read_sql("""
                     SELECT p.tipo, p.marca, p.modelo, m.nota FROM movimientos m
                     JOIN productos p ON m.producto_id = p.id
-                    WHERE m.nota LIKE ? AND m.cantidad = 0
+                    WHERE m.nota LIKE %s AND m.cantidad = 0
                 """, conn, params=(f"Reserva: {f_cliente} ({f_asignado}) | F:%",))
 
                 if selecciones_totales or not df_faltantes_temp.empty:
@@ -155,36 +154,41 @@ def render():
 
                 if st.button("💾 CONFIRMAR TODA LA RESERVA", type="primary", use_container_width=True):
                     if selecciones_totales:
+                        cursor = conn.cursor()
                         for item in selecciones_totales:
                             reserva = min(item['pedida'], item['stock'])
                             falta = max(0, item['pedida'] - item['stock'])
                             
-                            if "Buenos Aires" in f_asignado or "Bs. As." in f_asignado:
-                                nota_res = f"Reserva: {f_cliente} ({f_asignado}) | F: {int(falta)}"
-                            else:
-                                if falta > 0:
-                                    nota_res = f"Reserva: {f_cliente} ({f_asignado}) | F: {int(falta)} | Despacho: PENDIENTE | Cantidad: {int(falta)}"
-                                else:
-                                    nota_res = f"Reserva: {f_cliente} ({f_asignado}) | F: 0"
+                            # 🎯 SI SE SACA DE BS. AS. PARA OTRA SEDE (FORMOSA/BOLIVAR), GENERA MARCA DE DESPACHO DIRECTO LISTO EN GALPÓN
+                            es_provincia = f_asignado in ["Formosa", "Bolivar"]
+                            es_origen_bsas = "Buenos Aires" in item['sede'] or "Bs. As." in item['sede']
+                            
+                            tag_despacho = ""
+                            if es_provincia and es_origen_bsas and reserva > 0:
+                                tag_despacho = f" | Despacho: PENDIENTE | Cantidad: {int(reserva)} | RECIBIDO"
+                            elif es_provincia and falta > 0:
+                                tag_despacho = f" | Despacho: PENDIENTE | Cantidad: {int(falta)}"
+
+                            nota_res = f"Reserva: {f_cliente} ({f_asignado}) | F: {int(falta)}{tag_despacho}"
                                     
-                            conn.execute("INSERT INTO movimientos (producto_id, cantidad, fecha, asignacion, nota) VALUES (?, ?, ?, ?, ?)",
+                            cursor.execute("INSERT INTO movimientos (producto_id, cantidad, fecha, asignacion, nota) VALUES (%s, %s, %s, %s, %s)",
                                          (item['id'], -int(reserva), datetime.now().strftime("%Y-%m-%d"), item['sede'], nota_res))
                             
-                            # 📜 LOG: Reserva individual de stock
                             registrar_accion(
                                 conn=conn,
                                 usuario=st.session_state['usuario_actual'],
                                 accion="CREAR_RESERVA",
-                                detalles=f"Reservó {int(reserva)} un. de stock real de {item['tipo']} {item['marca']} {item['modelo']} (Sede: {item['sede']})",
+                                detalles=f"Reservó {int(reserva)} un. de stock real de {item['tipo']} {item['marca']} {item['modelo']} (Sede: {item['sede']}) para {f_cliente}",
                                 producto_id=item['id'],
                                 cliente=f_cliente
                             )
                         conn.commit()
+                        cursor.close()
                         
-                        st.session_state["mensaje_exito"] = f"🎉 ¡Reserva para '{f_cliente}' creada con éxito!"
-                        st.session_state.mostrar_form_nueva = False
-                        st.session_state.mostrar_activas = True
-                        st.rerun()
+                    st.session_state["mensaje_exito"] = f"🎉 ¡Reserva para '{f_cliente}' creada con éxito!"
+                    st.session_state.mostrar_form_nueva = False
+                    st.session_state.mostrar_activas = True
+                    st.rerun()
 
     # --- 4. RESERVAS ACTIVAS ---
     if st.session_state.mostrar_activas:
@@ -204,7 +208,7 @@ def render():
                    m.cantidad as cant_real, ABS(m.cantidad) as res, m.nota, m.asignacion as sede, m.fecha
             FROM movimientos m
             JOIN productos p ON m.producto_id = p.id
-            WHERE m.nota LIKE 'Reserva: %'
+            WHERE m.nota LIKE 'Reserva: %%'
         """, conn)
 
         if not df_m.empty:
@@ -223,8 +227,125 @@ def render():
             for cli in df_m['cliente_completo'].unique():
                 df_cli = df_m[df_m['cliente_completo'] == cli]
                 total_f = df_cli['falta'].sum()
+                sede_cli_default = re.search(r'\((.*?)\)', cli).group(1) if '(' in cli else sedes_db[0]
+                
                 with st.container(border=True):
-                    st.markdown(f"#### 👤 Cliente: {cli}")
+                    head_col1, head_col2 = st.columns([3, 1])
+                    head_col1.markdown(f"#### 👤 Cliente: {cli}")
+                    
+                    with head_col2.popover("➕ Agregar Equipo", use_container_width=True):
+                        st.markdown("##### ➕ Añadir a esta Reserva")
+                        
+                        tab_stk, tab_compras = st.tabs(["📦 De Stock", "🚨 Solicitar Compra"])
+                        
+                        with tab_stk:
+                            sede_sel_stk = st.selectbox("Sede Origen:", sedes_db, index=sedes_db.index(sede_cli_default) if sede_cli_default in sedes_db else 0, key=f"s_stk_{cli}")
+                            
+                            q_stk_dispo = """
+                                SELECT p.id, p.tipo, p.marca, p.modelo, SUM(m.cantidad) as disponible
+                                FROM productos p
+                                JOIN movimientos m ON p.id = m.producto_id
+                                WHERE m.asignacion = %s
+                                GROUP BY p.id, p.tipo, p.marca, p.modelo
+                                HAVING disponible > 0
+                                ORDER BY p.tipo, p.marca, p.modelo
+                            """
+                            df_stk_avail = pd.read_sql(q_stk_dispo, conn, params=(sede_sel_stk,))
+                            
+                            if df_stk_avail.empty:
+                                st.warning(f"⚠️ No hay stock disponible en {sede_sel_stk}.")
+                            else:
+                                prods_stk_opts = {f"{r['tipo']} - {r['marca']} {r['modelo']} (Disp: {int(r['disponible'])})": (r['id'], int(r['disponible'])) for _, r in df_stk_avail.iterrows()}
+                                p_stk_label = st.selectbox("Seleccionar Producto:", list(prods_stk_opts.keys()), key=f"p_stk_{cli}")
+                                p_stk_id, max_disp = prods_stk_opts[p_stk_label]
+                                
+                                c_stk_cant = st.number_input("Cantidad a reservar:", min_value=1, max_value=max_disp, value=1, key=f"c_stk_{cli}")
+                                
+                                if st.button("Confirmar Reserva de Stock", key=f"btn_stk_conf_{cli}", type="primary", use_container_width=True):
+                                    cursor = conn.cursor()
+                                    
+                                    # 🎯 MARCA AUTOMÁTICA DE DESPACHO SI SE SACA DE BS AS A PROVINCIA
+                                    tag_desp_stk = ""
+                                    if sede_cli_default in ["Formosa", "Bolivar"] and ("Buenos Aires" in sede_sel_stk or "Bs. As." in sede_sel_stk):
+                                        tag_desp_stk = f" | Despacho: PENDIENTE | Cantidad: {int(c_stk_cant)} | RECIBIDO"
+
+                                    nota_stk_nueva = f"Reserva: {cli} | F: 0{tag_desp_stk}"
+                                    cursor.execute(
+                                        "INSERT INTO movimientos (producto_id, cantidad, fecha, asignacion, nota) VALUES (%s, %s, %s, %s, %s)",
+                                        (p_stk_id, -int(c_stk_cant), datetime.now().strftime("%Y-%m-%d"), sede_sel_stk, nota_stk_nueva)
+                                    )
+                                    registrar_accion(
+                                        conn=conn,
+                                        usuario=st.session_state['usuario_actual'],
+                                        accion="CREAR_RESERVA",
+                                        detalles=f"Agregó {int(c_stk_cant)} un. de stock a la reserva activa del cliente: {cli} (Sede: {sede_sel_stk})",
+                                        producto_id=p_stk_id,
+                                        cliente=cli
+                                    )
+                                    conn.commit()
+                                    cursor.close()
+                                    st.success("¡Stock reservado!")
+                                    st.rerun()
+
+                        with tab_compras:
+                            df_prods_all = pd.read_sql("SELECT id, tipo, marca, modelo FROM productos ORDER BY tipo, marca, modelo", conn)
+                            tipos_all = sorted(df_prods_all['tipo'].unique().tolist()) if not df_prods_all.empty else []
+                            
+                            t_cmp_sel = st.selectbox("Tipo:", ["Seleccione..."] + tipos_all, key=f"t_cmp_{cli}")
+                            prods_cmp_list = ["Seleccione..."]
+                            if t_cmp_sel != "Seleccione...":
+                                df_cmp_filt = df_prods_all[df_prods_all['tipo'] == t_cmp_sel]
+                                prods_cmp_list += (df_cmp_filt['marca'] + " " + df_cmp_filt['modelo']).tolist()
+                                
+                            p_cmp_sel = st.selectbox("Producto:", prods_cmp_list, key=f"p_cmp_{cli}")
+                            c_cmp_cant = st.number_input("Cantidad a solicitar:", min_value=1, value=1, step=1, key=f"c_cmp_{cli}")
+                            
+                            if st.button("Confirmar Solicitud de Compra", key=f"btn_cmp_conf_{cli}", type="primary", use_container_width=True):
+                                if t_cmp_sel != "Seleccione..." and p_cmp_sel != "Seleccione...":
+                                    m_cmp_parts = p_cmp_sel.split(" ")
+                                    marca_cmp = m_cmp_parts[0]
+                                    modelo_cmp = " ".join(m_cmp_parts[1:])
+                                    
+                                    row_cmp = df_prods_all[(df_prods_all['tipo'] == t_cmp_sel) & (df_prods_all['marca'] == marca_cmp) & (df_prods_all['modelo'] == modelo_cmp)]
+                                    
+                                    if not row_cmp.empty:
+                                        prod_cmp_id = int(row_cmp.iloc[0]['id'])
+                                        cursor = conn.cursor()
+                                        
+                                        row_existente = df_cli[(df_cli['producto_id'] == prod_cmp_id) & (df_cli['cant_real'] == 0)]
+                                        
+                                        if not row_existente.empty:
+                                            id_mov_exist = int(row_existente.iloc[0]['id'])
+                                            falta_actual = int(row_existente.iloc[0]['falta'])
+                                            nueva_falta = falta_actual + int(c_cmp_cant)
+                                            
+                                            nota_orig_ex = str(row_existente.iloc[0]['nota'])
+                                            nota_actualizada = re.sub(r'\| F: \d+', f'| F: {nueva_falta}', nota_orig_ex)
+                                            
+                                            cursor.execute("UPDATE movimientos SET nota = %s WHERE id = %s", (nota_actualizada, id_mov_exist))
+                                            detalles_log = f"Sumó {int(c_cmp_cant)} un. al faltante existente de {t_cmp_sel} {marca_cmp} {modelo_cmp} para {cli}. Total pendiente: {nueva_falta} un."
+                                        else:
+                                            marker_desp_cmp = " | Despacho: PENDIENTE" if sede_cli_default in ["Formosa", "Bolivar"] else ""
+                                            nota_cmp_nueva = f"Reserva: {cli} | F: {int(c_cmp_cant)}{marker_desp_cmp}"
+                                            cursor.execute(
+                                                "INSERT INTO movimientos (producto_id, cantidad, fecha, asignacion, nota) VALUES (%s, 0, %s, %s, %s)",
+                                                (prod_cmp_id, datetime.now().strftime("%Y-%m-%d"), sede_cli_default, nota_cmp_nueva)
+                                            )
+                                            detalles_log = f"Solicitó nuevo faltante de compras ({int(c_cmp_cant)} un.) de {t_cmp_sel} {marca_cmp} {modelo_cmp} para {cli}."
+                                        
+                                        registrar_accion(
+                                            conn=conn,
+                                            usuario=st.session_state['usuario_actual'],
+                                            accion="FALTANTE_SOLICITADO",
+                                            detalles=detalles_log,
+                                            producto_id=prod_cmp_id,
+                                            cliente=cli
+                                        )
+                                        conn.commit()
+                                        cursor.close()
+                                        st.success("¡Solicitud enviada a Compras!")
+                                        st.rerun()
+
                     if total_f > 0: st.warning("Pendiente de Compras")
                     for s_ref in df_cli['sede'].unique():
                         df_cs = df_cli[df_cli['sede'] == s_ref]
@@ -233,7 +354,7 @@ def render():
                             col1.write(f"{r['tipo']} {r['marca']} {r['modelo']}")
                             col2.write(r['proveedor'] if r['res'] > 0 or r['falta'] == 0 else "*-*")
                             
-                            stock_mostrar = 1 if r['cant_real'] < 0 else 0
+                            stock_mostrar = r['res'] if r['cant_real'] < 0 else 0
                             col3.write(f"Stock: {stock_mostrar}")
                             
                             if r['falta'] > 0:
@@ -289,16 +410,16 @@ def render():
                                         cant_dev = st.number_input("Cantidad:", min_value=1, max_value=int(r['res']), value=1, step=1, key=f"c_dev_{r['id']}")
                                     
                                     if st.button("Confirmar Devolución", key=f"btn_dev_{r['id']}", use_container_width=True):
+                                        cursor = conn.cursor()
                                         if tipo_dev == "Toda" or cant_dev == r['res']:
-                                            conn.execute("DELETE FROM movimientos WHERE id = ?", (r['id'],))
+                                            cursor.execute("DELETE FROM movimientos WHERE id = %s", (r['id'],))
                                             st.session_state['etiquetas_impresas'].discard(r['id'])
                                             detalles_devolucion = f"Devolvió la totalidad de {r['tipo']} {r['marca']} {r['modelo']} (Cant: {r['res']}) al stock."
                                         else:
                                             nueva_cant = -(r['res'] - cant_dev)
-                                            conn.execute("UPDATE movimientos SET cantidad = ? WHERE id = ?", (nueva_cant, r['id']))
+                                            cursor.execute("UPDATE movimientos SET cantidad = %s WHERE id = %s", (nueva_cant, r['id']))
                                             detalles_devolucion = f"Devolvió parte de la reserva ({cant_dev} un.) de {r['tipo']} {r['marca']} {r['modelo']}. Quedan {r['res'] - cant_dev} un. reservados."
                                         
-                                        # 📜 LOG: Devolución a stock
                                         registrar_accion(
                                             conn=conn,
                                             usuario=st.session_state['usuario_actual'],
@@ -308,6 +429,7 @@ def render():
                                             cliente=cli
                                         )
                                         conn.commit()
+                                        cursor.close()
                                         st.success("Devuelto al stock.")
                                         st.rerun()
                             else:
@@ -315,11 +437,11 @@ def render():
                                 
                     b1, b2 = st.columns(2)
                     if b1.button("🗑️ Cancelar Todo", key=f"del_cli_{cli}", use_container_width=True):
+                        cursor = conn.cursor()
                         for item_id in df_cli['id'].tolist():
                             st.session_state['etiquetas_impresas'].discard(item_id)
-                        conn.execute("DELETE FROM movimientos WHERE nota LIKE ?", (f"Reserva: {cli}%",))
+                        cursor.execute("DELETE FROM movimientos WHERE nota LIKE %s", (f"Reserva: {cli}%%",))
                         
-                        # 📜 LOG: Cancelación total de cliente
                         registrar_accion(
                             conn=conn,
                             usuario=st.session_state['usuario_actual'],
@@ -327,15 +449,17 @@ def render():
                             detalles=f"Canceló la totalidad de la reserva y liberó los materiales del cliente: {cli}",
                             cliente=cli
                         )
-                        conn.commit(); st.rerun()
+                        conn.commit()
+                        cursor.close()
+                        st.rerun()
                         
                     if b2.button("✅ Instalar", key=f"inst_cli_{cli}", type="primary", use_container_width=True):
                         if total_f > 0: 
                             st.error("Faltan equipos.")
                         else: 
-                            conn.execute("UPDATE movimientos SET nota=? WHERE nota LIKE ?", (f"Instalado: {cli} - {datetime.now().strftime('%Y-%m-%d')}", f"Reserva: {cli}%"))
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE movimientos SET nota=%s WHERE nota LIKE %s", (f"Instalado: {cli} - {datetime.now().strftime('%Y-%m-%d')}", f"Reserva: {cli}%%"))
                             
-                            # 📜 LOG: Instalación concretada
                             registrar_accion(
                                 conn=conn,
                                 usuario=st.session_state['usuario_actual'],
@@ -343,7 +467,9 @@ def render():
                                 detalles=f"Cerró la reserva y pasó a estado 'Instalado' la obra completa del cliente: {cli}",
                                 cliente=cli
                             )
-                            conn.commit(); st.rerun()
+                            conn.commit()
+                            cursor.close()
+                            st.rerun()
 
     # --- 5. HISTORIAL ---
     if st.session_state.mostrar_historico:
@@ -372,7 +498,7 @@ def render():
             SELECT p.proveedor, p.tipo, p.marca, p.modelo, ABS(m.cantidad) as cant_mov, m.nota, m.fecha
             FROM movimientos m
             JOIN productos p ON m.producto_id = p.id
-            WHERE m.nota LIKE 'Instalado%'
+            WHERE m.nota LIKE 'Instalado%%'
             ORDER BY m.fecha DESC
         """
         df_hist = pd.read_sql(query_h, conn)

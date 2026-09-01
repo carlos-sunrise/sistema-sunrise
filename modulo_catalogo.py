@@ -95,6 +95,8 @@ def render():
                                             lista_elementos.append(p_limpio)
                             return " / ".join(lista_elementos)
 
+                        cursor = conn.cursor()
+
                         for _, row in df_clean.iterrows():
                             tipo_val = str(row['tipo']).strip()
                             marca_val = str(row['marca']).strip()
@@ -116,19 +118,20 @@ def render():
                             
                             if match_id is None:
                                 prov_final_nuevo = limpiar_y_unificar_proveedores(prov_excel)
-                                conn.execute("""
+                                cursor.execute("""
                                     INSERT INTO productos (tipo, marca, modelo, u, proveedor) 
-                                    VALUES (?, ?, ?, ?, ?)
+                                    VALUES (%s, %s, %s, %s, %s)
                                 """, (tipo_val, marca_val, modelo_val, u_val, prov_final_nuevo))
                                 registros_nuevos += 1
                             else:
                                 prov_final = limpiar_y_unificar_proveedores(prov_actual_db, prov_excel)
-                                conn.execute("""
-                                    UPDATE productos SET tipo=?, marca=?, u=?, proveedor=? WHERE id=?
+                                cursor.execute("""
+                                    UPDATE productos SET tipo=%s, marca=%s, u=%s, proveedor=%s WHERE id=%s
                                 """, (tipo_val, marca_val, u_val, prov_final, int(match_id)))
                                 registros_actualizados += 1
                         
                         conn.commit()
+                        cursor.close()
                         st.success(f"✅ ¡Catálogo Saneado! Proceso completado: {registros_nuevos} nuevos, {registros_actualizados} actualizados y unificados sin repeticiones.")
                         time.sleep(1.5)
                         st.rerun()

@@ -6,16 +6,15 @@ def render():
     st.header("📊 Inventario Detallado")
     conn = get_connection()
 
-    # --- 1. CONSULTA DE DATOS OPTIMIZADA CON EXTRACCIÓN DE PROVEEDOR REAL ---
-    # Extraemos dinámicamente el proveedor desde el texto de m.nota (ej: "Prov: Multiradio").
-    # Si no lo encuentra, usa el proveedor genérico del catálogo (p.proveedor) como respaldo.
+    # --- 1. CONSULTA SQL CON TRAZABILIDAD POR PROVEEDOR DE INGRESO ---
+    # Extraemos el proveedor real indicado en el remito/compra desde m.nota
     query_stock = """
         SELECT 
             p.tipo, 
             p.marca, 
             p.modelo, 
             CASE 
-                WHEN m.nota LIKE '%Prov: %' THEN 
+                WHEN m.nota LIKE '%%Prov: %%' THEN 
                     CASE 
                         WHEN INSTR(SUBSTR(m.nota, INSTR(m.nota, 'Prov: ') + 6), ' |') > 0 THEN
                             SUBSTR(SUBSTR(m.nota, INSTR(m.nota, 'Prov: ') + 6), 1, INSTR(SUBSTR(m.nota, INSTR(m.nota, 'Prov: ') + 6), ' |') - 1)
@@ -29,8 +28,9 @@ def render():
             p.u
         FROM productos p 
         INNER JOIN movimientos m ON p.id = m.producto_id 
-        GROUP BY p.id, m.asignacion, proveedor_real
+        GROUP BY p.id, p.tipo, p.marca, p.modelo, m.asignacion, p.u, proveedor_real
         HAVING saldo_neto > 0
+        ORDER BY p.tipo, p.marca, p.modelo, proveedor_real
     """
     
     try:
@@ -52,10 +52,7 @@ def render():
                     es_bsas = "Bs. As." in sede or "Buenos Aires" in sede
                     
                     with st.expander(f"📍 Ubicación: {sede}", expanded=es_bsas):
-                        # Forzamos las columnas específicas utilizando la nueva columna extraída
                         df_viz = df_sede[['tipo', 'marca', 'modelo', 'proveedor_real', 'saldo_neto', 'u']]
-                        
-                        # Cambiamos nombres para una visualización más prolija
                         df_viz.columns = ["Tipo", "Marca", "Modelo", "Proveedor Real", "Cantidad Disponible", "Unidad"]
                         
                         st.dataframe(
