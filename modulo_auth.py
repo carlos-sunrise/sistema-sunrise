@@ -51,38 +51,47 @@ def crear_usuario_inicial():
         print(f"Error al verificar/crear usuario inicial: {e}")
 
 def render_login():
-    """Dibuja la pantalla de login con cabecera de marca y formulario."""
+    """Dibuja la pantalla de login compacta sin necesidad de scroll."""
     crear_usuario_inicial()
+    
+    # --- REDUCIR ESPACIO BLANCO SUPERIOR DE STREAMLIT ---
+    st.markdown("""
+        <style>
+            .block-container {
+                padding-top: 1rem !important;
+                padding-bottom: 0rem !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
     
     # --- RUTA ABSOLUTA PARA EL LOGO ---
     dir_actual = os.path.dirname(os.path.abspath(__file__))
     ruta_logo = os.path.join(dir_actual, "logo.png")
     
-    # Si no está en la misma carpeta del módulo, buscar en la raíz principal
     if not os.path.exists(ruta_logo):
         ruta_logo = os.path.join(os.getcwd(), "logo.png")
 
-    # --- CABECERA CON LOGO CENTRADO ---
-    col_a, col_b, col_c = st.columns([1, 1.2, 1])
-    with col_b:
+    # --- CONTENEDOR CENTRAL COMPACTO ---
+    col1, col2, col3 = st.columns([1, 1.8, 1])
+    
+    with col2:
+        # LOGO CENTRADO Y DE TAMAÑO CONTROLADO (220px)
         if os.path.exists(ruta_logo):
             try:
                 img_logo = Image.open(ruta_logo)
-                st.image(img_logo, use_container_width=True)
+                c_img1, c_img2, c_img3 = st.columns([1, 2, 1])
+                with c_img2:
+                    st.image(img_logo, width=220)
             except Exception:
-                st.markdown("<h1 style='text-align: center;'>🌅</h1>", unsafe_allow_html=True)
+                st.markdown("<h2 style='text-align: center; margin: 0;'>🌅</h2>", unsafe_allow_html=True)
         else:
-            st.markdown("<h1 style='text-align: center;'>🌅</h1>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center; margin: 0;'>🌅</h2>", unsafe_allow_html=True)
             
-    # Títulos y subtítulos
-    st.markdown("<h2 style='text-align: center; margin-bottom: 0px;'>Sistema Sunrise</h2>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center; color: #555555; margin-top: 5px; margin-bottom: 5px;'>Sistema de Gestión - Operaciones</h4>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #888888;'>Inicio de Sesión</p>", unsafe_allow_html=True)
-    st.write("---")
-    
-    # --- FORMULARIO DE ACCESO ---
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+        # TITULOS COMPACTOS CON MARGENES MINIMOS
+        st.markdown("<h3 style='text-align: center; margin-top: 5px; margin-bottom: 0px;'>Sistema Sunrise</h3>", unsafe_allow_html=True)
+        st.markdown("<h5 style='text-align: center; color: #555555; margin-top: 2px; margin-bottom: 12px;'>Sistema de Gestión - Operaciones</h5>", unsafe_allow_html=True)
+        
+        # FORMULARIO
         with st.form("form_login"):
             username = st.text_input("Usuario")
             password = st.text_input("Contraseña", type="password")
