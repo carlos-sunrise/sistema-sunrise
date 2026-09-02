@@ -1,6 +1,7 @@
 import streamlit as st
 import hashlib
 import os
+from PIL import Image
 from db_utils import get_connection
 
 def hash_password(password):
@@ -37,7 +38,6 @@ def crear_usuario_inicial():
         count = cursor.fetchone()[0]
         
         if count == 0:
-            # Crea usuario por defecto: admin / sunrise123
             pwd_hash = hash_password("sunrise123")
             cursor.execute(
                 "INSERT INTO usuarios (username, password_hash, nombre, rol) VALUES (%s, %s, %s, %s)",
@@ -52,17 +52,29 @@ def crear_usuario_inicial():
 
 def render_login():
     """Dibuja la pantalla de login con cabecera de marca y formulario."""
-    crear_usuario_inicial() # Asegura que exista al menos el usuario admin
+    crear_usuario_inicial()
     
+    # --- RUTA ABSOLUTA PARA EL LOGO ---
+    dir_actual = os.path.dirname(os.path.abspath(__file__))
+    ruta_logo = os.path.join(dir_actual, "logo.png")
+    
+    # Si no está en la misma carpeta del módulo, buscar en la raíz principal
+    if not os.path.exists(ruta_logo):
+        ruta_logo = os.path.join(os.getcwd(), "logo.png")
+
     # --- CABECERA CON LOGO CENTRADO ---
     col_a, col_b, col_c = st.columns([1, 1.2, 1])
     with col_b:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
+        if os.path.exists(ruta_logo):
+            try:
+                img_logo = Image.open(ruta_logo)
+                st.image(img_logo, use_container_width=True)
+            except Exception:
+                st.markdown("<h1 style='text-align: center;'>🌅</h1>", unsafe_allow_html=True)
         else:
-            st.markdown("<h1 style='text-align: center; margin-bottom: 0px;'>🌅</h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align: center;'>🌅</h1>", unsafe_allow_html=True)
             
-    # Título principal, subtítulo de operaciones y bajada de login
+    # Títulos y subtítulos
     st.markdown("<h2 style='text-align: center; margin-bottom: 0px;'>Sistema Sunrise</h2>", unsafe_allow_html=True)
     st.markdown("<h4 style='text-align: center; color: #555555; margin-top: 5px; margin-bottom: 5px;'>Sistema de Gestión - Operaciones</h4>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #888888;'>Inicio de Sesión</p>", unsafe_allow_html=True)
