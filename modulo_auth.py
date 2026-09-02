@@ -1,5 +1,6 @@
 import streamlit as st
 import hashlib
+import os
 from db_utils import get_connection
 
 def hash_password(password):
@@ -50,13 +51,24 @@ def crear_usuario_inicial():
         print(f"Error al verificar/crear usuario inicial: {e}")
 
 def render_login():
-    """Dibuja la pantalla de login."""
+    """Dibuja la pantalla de login con cabecera de marca y formulario."""
     crear_usuario_inicial() # Asegura que exista al menos el usuario admin
     
-    st.markdown("<h2 style='text-align: center;'>🌅 Sistema Sunrise</h2>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center; color: gray;'>Inicio de Sesión</h4>", unsafe_allow_html=True)
+    # --- CABECERA CON LOGO CENTRADO ---
+    col_a, col_b, col_c = st.columns([1, 1.2, 1])
+    with col_b:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", use_container_width=True)
+        else:
+            st.markdown("<h1 style='text-align: center; margin-bottom: 0px;'>🌅</h1>", unsafe_allow_html=True)
+            
+    # Título principal, subtítulo de operaciones y bajada de login
+    st.markdown("<h2 style='text-align: center; margin-bottom: 0px;'>Sistema Sunrise</h2>", unsafe_allow_html=True)
+    st.markdown("<h4 style='text-align: center; color: #555555; margin-top: 5px; margin-bottom: 5px;'>Sistema de Gestión - Operaciones</h4>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #888888;'>Inicio de Sesión</p>", unsafe_allow_html=True)
     st.write("---")
     
+    # --- FORMULARIO DE ACCESO ---
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.form("form_login"):
