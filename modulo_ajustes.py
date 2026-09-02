@@ -17,12 +17,13 @@ def render():
     if "v_provs" not in st.session_state: st.session_state["v_provs"] = 0
     if "v_tipos" not in st.session_state: st.session_state["v_tipos"] = 0
 
-    tab_sedes, tab_provs, tab_tipos, tab_auditoria, tab_usuarios = st.tabs([
+    tab_sedes, tab_provs, tab_tipos, tab_auditoria, tab_usuarios, tab_peligro = st.tabs([
         "📍 Sedes", 
         "🏢 Proveedores", 
         "📦 Tipos de Equipo", 
         "🔍 Historial de Movimientos",
-        "👥 Usuarios"
+        "👥 Usuarios",
+        "⚠️ Zona de Peligro"
     ])
 
     # --- TAB: SEDES ---
@@ -60,9 +61,9 @@ def render():
             sel_s = st.selectbox("Eliminar sede:", ["Seleccione..."] + lista_s, key=f"del_s_{st.session_state['v_sedes']}")
             
             if st.button("Eliminar Sede", type="secondary"):
-                if sel_s != "Seleccione...":
+                if sel_s and sel_s != "Seleccione..." and len(sel_s.strip()) > 0:
                     cursor = conn.cursor()
-                    cursor.execute("DELETE FROM sedes WHERE nombre = %s", (sel_s,))
+                    cursor.execute("DELETE FROM sedes WHERE nombre = %s LIMIT 1", (sel_s.strip(),))
                     conn.commit()
                     cursor.close()
                     st.cache_data.clear()  # 🎯 Limpia caché global
@@ -105,9 +106,9 @@ def render():
             sel_p = st.selectbox("Eliminar proveedor:", ["Seleccione..."] + lista_p, key=f"del_p_{st.session_state['v_provs']}")
             
             if st.button("Eliminar Proveedor", type="secondary"):
-                if sel_p != "Seleccione...":
+                if sel_p and sel_p != "Seleccione..." and len(sel_p.strip()) > 0:
                     cursor = conn.cursor()
-                    cursor.execute("DELETE FROM proveedores WHERE nombre = %s", (sel_p,))
+                    cursor.execute("DELETE FROM proveedores WHERE nombre = %s LIMIT 1", (sel_p.strip(),))
                     conn.commit()
                     cursor.close()
                     st.cache_data.clear()
@@ -150,9 +151,9 @@ def render():
             sel_t = st.selectbox("Eliminar tipo:", ["Seleccione..."] + lista_t, key=f"del_t_{st.session_state['v_tipos']}")
             
             if st.button("Eliminar Tipo", type="secondary"):
-                if sel_t != "Seleccione...":
+                if sel_t and sel_t != "Seleccione..." and len(sel_t.strip()) > 0:
                     cursor = conn.cursor()
-                    cursor.execute("DELETE FROM tipos_equipo WHERE nombre = %s", (sel_t,))
+                    cursor.execute("DELETE FROM tipos_equipo WHERE nombre = %s LIMIT 1", (sel_t.strip(),))
                     conn.commit()
                     cursor.close()
                     st.cache_data.clear()
@@ -314,5 +315,61 @@ def render():
                             st.caption("")
 
                     st.divider()
+
+    # --- 🚨 TAB NUEVA: ZONA DE PELIGRO (BORRADO MASIVO) ---
+    with tab_peligro:
+        st.subheader("⚠️ Zona de Peligro - Mantenimiento de Datos")
+        st.error("🚨 ATENCIÓN: Las acciones en esta sección son irreversibles.")
+        
+        usuario_actual = st.session_state.get('usuario', {})
+        es_admin = usuario_actual.get('rol') == 'admin' or 'usuario' not in st.session_state
+
+        if not es_admin:
+            st.warning("🔒 Solo los administradores tienen acceso a la Zona de Peligro.")
+        else:
+            with st.container(border=True):
+                st.markdown("### 🧹 Depuración de Base de Datos")
+                st.write("Escribí **CONFIRMAR** para habilitar los botones de borrado masivo.")
+                
+                clave_peligro = st.text_input("Clave de validación:", key="input_peligro_tab", autocomplete="off")
+                
+                if clave_peligro.strip() == "CONFIRMAR":
+                    st.error("❗ SELECCIONÁ LA ACCIÓN A EJECUTAR")
+                    col_p1, col_p2 = st.columns(2)
+                    
+                    # OPCIÓN A: Vaciar el Stock (Movimientos)
+                    if col_p1.button("🔥 VACIAR TODO EL STOCK (MOVIMIENTOS)", type="primary", use_container_width=True):
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM movimientos")
+                            cursor.execute("DELETE FROM log_auditoria")
+                            cursor.execute("DELETE FROM historial_remitos")
+                            conn.commit()
+                            cursor.close()
+                            st.cache_data.clear()
+                            st.success("✅ Historial de movimientos y auditoría eliminado correctamente.")
+                            time.sleep(1.2)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al borrar: {e}")
+                            
+                    # OPCIÓN B: Reset Total (Catálogo + Stock)
+                    if col_p2.button("💀 RESET TOTAL (CATÁLOGO + STOCK)", type="primary", use_container_width=True):
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM movimientos")
+                            cursor.execute("DELETE FROM productos")
+                            cursor.execute("DELETE FROM log_auditoria")
+                            cursor.execute("DELETE FROM historial_remitos")
+                            conn.commit()
+                            cursor.close()
+                            st.cache_data.clear()
+                            st.success("✅ Sistema reseteado por completo (Catálogo y Stock vaciados).")
+                            time.sleep(1.2)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al resetear: {e}")
+                else:
+                    st.info("Escribí CONFIRMAR para mostrar los botones de borrado.")
 
     conn.close()

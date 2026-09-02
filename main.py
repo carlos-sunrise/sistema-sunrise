@@ -1,6 +1,6 @@
 import streamlit as st
 from db_utils import inicializar_db, get_connection
-from modulo_auth import render_login  # 🔐 Importación del módulo de login
+from modulo_auth import render_login  # type: ignore # 🔐 Importación del módulo de login
 import modulo_stock, modulo_ingreso, modulo_reservas, modulo_catalogo, modulo_ajustes
 import modulo_compras 
 import modulo_despachos 
@@ -21,11 +21,15 @@ if not st.session_state['autenticado']:
 else:
     # --- SISTEMA COMPLETO (Solo visible si inició sesión) ---
     
+    # Validamos si el usuario actual es Administrador
+    usuario_actual = st.session_state.get('usuario', {})
+    es_admin = usuario_actual.get('rol') == 'admin'
+
     # --- BARRA LATERAL ---
     st.sidebar.title("☀️ Sistema Sunrise")
     
     # Muestra el nombre del usuario logueado y botón para salir
-    st.sidebar.write(f"👤 **{st.session_state['usuario']['nombre']}**")
+    st.sidebar.write(f"👤 **{usuario_actual.get('nombre', 'Usuario')}**")
     if st.sidebar.button("🔒 Cerrar Sesión"):
         st.session_state['autenticado'] = False
         st.session_state['usuario'] = None
@@ -33,9 +37,9 @@ else:
         
     st.sidebar.divider()
 
-    menu = st.sidebar.radio(
-        "Menú de Navegación",
-        [
+    # Definimos el menú dinámico según el ROL
+    if es_admin:
+        opciones_menu = [
             "📊 Tablero de Stock", 
             "📥 Ingreso/Recepción", 
             "📝 Reservas y Salidas", 
@@ -44,48 +48,16 @@ else:
             "📂 Catálogo", 
             "⚙️ Configuración"
         ]
-    )
+    else:
+        opciones_menu = [
+            "📊 Tablero de Stock", 
+            "📝 Reservas y Salidas", 
+            "🛒 Gestión de Compras"
+        ]
+
+    menu = st.sidebar.radio("Menú de Navegación", opciones_menu)
 
     st.sidebar.divider()
-
-    # --- ZONA DE PELIGRO (Acciones de Limpieza con Guardado Forzado) ---
-    with st.sidebar.expander("⚠️ Zona de Peligro"):
-        st.write("Escribí **CONFIRMAR** para habilitar el borrado masivo.")
-        clave = st.text_input("Clave de validación:", key="input_peligro")
-        
-        if clave == "CONFIRMAR":
-            st.error("❗ ACCIONES CRÍTICAS")
-            
-            # OPCIÓN A: Vaciar el Stock (Movimientos)
-            if st.button("🔥 VACIAR TODO EL STOCK"):
-                try:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM movimientos")
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    st.success("✅ Historial de stock eliminado correctamente.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al borrar: {e}")
-                
-            # OPCIÓN B: Vaciar Catálogo + Stock
-            if st.button("💀 RESET TOTAL (Catálogo + Stock)"):
-                try:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM movimientos")
-                    cursor.execute("DELETE FROM productos")
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    st.success("✅ Sistema reseteado por completo.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al resetear: {e}")
-        else:
-            st.info("Escribí CONFIRMAR para ver opciones de borrado.")
 
     # --- ENRUTAMIENTO ---
     if menu == "📊 Tablero de Stock":
