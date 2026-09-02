@@ -51,7 +51,7 @@ def crear_usuario_inicial():
         print(f"Error al verificar/crear usuario inicial: {e}")
 
 def render_login():
-    """Dibuja la pantalla de login compacta sin necesidad de scroll."""
+    """Dibuja la pantalla de login ultra compacta sin título redundante."""
     crear_usuario_inicial()
     
     # --- REDUCIR ESPACIO BLANCO SUPERIOR DE STREAMLIT ---
@@ -75,7 +75,7 @@ def render_login():
     col1, col2, col3 = st.columns([1, 1.8, 1])
     
     with col2:
-        # LOGO CENTRADO Y DE TAMAÑO CONTROLADO (220px)
+        # LOGO CENTRADO (220px)
         if os.path.exists(ruta_logo):
             try:
                 img_logo = Image.open(ruta_logo)
@@ -87,11 +87,10 @@ def render_login():
         else:
             st.markdown("<h2 style='text-align: center; margin: 0;'>🌅</h2>", unsafe_allow_html=True)
             
-        # TITULOS COMPACTOS CON MARGENES MINIMOS
-        st.markdown("<h3 style='text-align: center; margin-top: 5px; margin-bottom: 0px;'>Sistema Sunrise</h3>", unsafe_allow_html=True)
-        st.markdown("<h5 style='text-align: center; color: #555555; margin-top: 2px; margin-bottom: 12px;'>Sistema de Gestión - Operaciones</h5>", unsafe_allow_html=True)
+        # SOLO SUBTITULO (SE QUITA "Sistema Sunrise")
+        st.markdown("<h4 style='text-align: center; color: #444444; margin-top: 5px; margin-bottom: 15px;'>Sistema de Gestión - Operaciones</h4>", unsafe_allow_html=True)
         
-        # FORMULARIO
+        # FORMULARIO DE ACCESO
         with st.form("form_login"):
             username = st.text_input("Usuario")
             password = st.text_input("Contraseña", type="password")
