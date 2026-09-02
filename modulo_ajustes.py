@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-from db_utils import get_connection, obtener_lista_sedes, obtener_lista_proveedores, obtener_lista_tipos
+from db_utils import get_connection, obtener_lista_proveedores, obtener_lista_tipos
 from modulo_auth import crear_usuario, obtener_lista_usuarios, cambiar_estado_usuario
 import time
-import hashlib  # 🎯 Usamos hashlib nativo de Python para la contraseña en caso de edición
+import hashlib
 
 def hash_password(password: str) -> str:
     """Genera un hash seguro con la librería estándar de Python"""
@@ -32,36 +32,43 @@ def render():
             st.subheader("Añadir Sede")
             nueva_sede = st.text_input("Nombre de la Sede:", key="add_sede", autocomplete="off")
             if st.button("Guardar Sede", type="primary"):
-                if nueva_sede:
+                nueva_sede_clean = nueva_sede.strip()
+                if nueva_sede_clean:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nombre FROM sedes WHERE nombre = %s", (nueva_sede,))
+                    cursor.execute("SELECT nombre FROM sedes WHERE nombre = %s", (nueva_sede_clean,))
                     existe = cursor.fetchone()
                     if existe:
-                        st.error(f"⚠️ La sede '{nueva_sede}' ya existe.")
+                        st.error(f"⚠️ La sede '{nueva_sede_clean}' ya existe.")
                     else:
-                        cursor.execute("INSERT INTO sedes (nombre) VALUES (%s)", (nueva_sede,))
+                        cursor.execute("INSERT INTO sedes (nombre) VALUES (%s)", (nueva_sede_clean,))
                         conn.commit()
+                        st.cache_data.clear()  # 🎯 Limpia caché global
                         st.session_state["v_sedes"] += 1
-                        st.success(f"✅ Sede '{nueva_sede}' añadida.")
-                        time.sleep(1.2)
+                        st.success(f"✅ Sede '{nueva_sede_clean}' añadida.")
+                        time.sleep(0.5)
                         cursor.close()
                         st.rerun()
                     cursor.close()
 
         with c2:
             st.subheader("Lista Actual / Eliminar")
-            lista_s = obtener_lista_sedes()
+            # 🎯 Consulta directa a la base de datos sin depender de caché
+            df_sedes_db = pd.read_sql("SELECT nombre FROM sedes ORDER BY nombre ASC", conn)
+            lista_s = df_sedes_db["nombre"].tolist() if not df_sedes_db.empty else []
+            
             st.dataframe(pd.DataFrame(lista_s, columns=["nombre"]), hide_index=True, use_container_width=True)
             sel_s = st.selectbox("Eliminar sede:", ["Seleccione..."] + lista_s, key=f"del_s_{st.session_state['v_sedes']}")
-            if st.button("Eliminar Sede"):
+            
+            if st.button("Eliminar Sede", type="secondary"):
                 if sel_s != "Seleccione...":
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM sedes WHERE nombre = %s", (sel_s,))
                     conn.commit()
                     cursor.close()
+                    st.cache_data.clear()  # 🎯 Limpia caché global
                     st.session_state["v_sedes"] += 1
-                    st.warning(f"Sede '{sel_s}' eliminada.")
-                    time.sleep(1.2)
+                    st.toast(f"Sede '{sel_s}' eliminada correctamente.")
+                    time.sleep(0.5)
                     st.rerun()
 
     # --- TAB: PROVEEDORES ---
@@ -81,27 +88,32 @@ def render():
                     else:
                         cursor.execute("INSERT INTO proveedores (nombre) VALUES (%s)", (nuevo_p_val,))
                         conn.commit()
+                        st.cache_data.clear()
                         st.session_state["v_provs"] += 1
                         st.success(f"✅ Proveedor '{nuevo_p_val}' añadido.")
-                        time.sleep(1.2)
+                        time.sleep(0.5)
                         cursor.close()
                         st.rerun()
                     cursor.close()
 
         with c2:
             st.subheader("Lista Actual / Eliminar")
-            lista_p = obtener_lista_proveedores()
+            df_provs_db = pd.read_sql("SELECT nombre FROM proveedores ORDER BY nombre ASC", conn)
+            lista_p = df_provs_db["nombre"].tolist() if not df_provs_db.empty else []
+            
             st.dataframe(pd.DataFrame(lista_p, columns=["nombre"]), hide_index=True, use_container_width=True)
             sel_p = st.selectbox("Eliminar proveedor:", ["Seleccione..."] + lista_p, key=f"del_p_{st.session_state['v_provs']}")
-            if st.button("Eliminar Proveedor"):
+            
+            if st.button("Eliminar Proveedor", type="secondary"):
                 if sel_p != "Seleccione...":
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM proveedores WHERE nombre = %s", (sel_p,))
                     conn.commit()
                     cursor.close()
+                    st.cache_data.clear()
                     st.session_state["v_provs"] += 1
-                    st.warning(f"Proveedor '{sel_p}' eliminado.")
-                    time.sleep(1.2)
+                    st.toast(f"Proveedor '{sel_p}' eliminado correctamente.")
+                    time.sleep(0.5)
                     st.rerun()
 
     # --- TAB: TIPOS ---
@@ -111,36 +123,42 @@ def render():
             st.subheader("Añadir Tipo")
             nuevo_t = st.text_input("Nombre del Tipo:", key="add_t", autocomplete="off")
             if st.button("Guardar Tipo", type="primary"):
-                if nuevo_t:
+                nuevo_t_clean = nuevo_t.strip()
+                if nuevo_t_clean:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nombre FROM tipos_equipo WHERE nombre = %s", (nuevo_t,))
+                    cursor.execute("SELECT nombre FROM tipos_equipo WHERE nombre = %s", (nuevo_t_clean,))
                     existe_t = cursor.fetchone()
                     if existe_t:
-                        st.error(f"⚠️ El tipo '{nuevo_t}' ya existe.")
+                        st.error(f"⚠️ El tipo '{nuevo_t_clean}' ya existe.")
                     else:
-                        cursor.execute("INSERT INTO tipos_equipo (nombre) VALUES (%s)", (nuevo_t,))
+                        cursor.execute("INSERT INTO tipos_equipo (nombre) VALUES (%s)", (nuevo_t_clean,))
                         conn.commit()
+                        st.cache_data.clear()
                         st.session_state["v_tipos"] += 1
-                        st.success(f"✅ Tipo '{nuevo_t}' añadido.")
-                        time.sleep(1.2)
+                        st.success(f"✅ Tipo '{nuevo_t_clean}' añadido.")
+                        time.sleep(0.5)
                         cursor.close()
                         st.rerun()
                     cursor.close()
 
         with c2:
             st.subheader("Lista Actual / Eliminar")
-            lista_t = obtener_lista_tipos()
+            df_tipos_db = pd.read_sql("SELECT nombre FROM tipos_equipo ORDER BY nombre ASC", conn)
+            lista_t = df_tipos_db["nombre"].tolist() if not df_tipos_db.empty else []
+            
             st.dataframe(pd.DataFrame(lista_t, columns=["nombre"]), hide_index=True, use_container_width=True)
             sel_t = st.selectbox("Eliminar tipo:", ["Seleccione..."] + lista_t, key=f"del_t_{st.session_state['v_tipos']}")
-            if st.button("Eliminar Tipo"):
+            
+            if st.button("Eliminar Tipo", type="secondary"):
                 if sel_t != "Seleccione...":
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM tipos_equipo WHERE nombre = %s", (sel_t,))
                     conn.commit()
                     cursor.close()
+                    st.cache_data.clear()
                     st.session_state["v_tipos"] += 1
-                    st.warning(f"Tipo '{sel_t}' eliminado.")
-                    time.sleep(1.2)
+                    st.toast(f"Tipo '{sel_t}' eliminado correctamente.")
+                    time.sleep(0.5)
                     st.rerun()
 
     # --- TAB: AUDITORÍA DE USUARIOS ---
@@ -207,7 +225,7 @@ def render():
         except Exception as e:
             st.error(f"No se pudo cargar el historial de auditoría: {e}")
 
-    # --- 👥 TAB: GESTIÓN DE USUARIOS (SIN BCRYPT) ---
+    # --- 👥 TAB: GESTIÓN DE USUARIOS ---
     with tab_usuarios:
         st.subheader("👥 Gestión de Usuarios del Sistema")
         
@@ -236,7 +254,7 @@ def render():
                             exito, mensaje = crear_usuario(nuevo_user, nueva_pass, nuevo_nombre, nuevo_rol)
                             if exito:
                                 st.success(mensaje)
-                                time.sleep(1.2)
+                                time.sleep(0.8)
                                 st.rerun()
                             else:
                                 st.error(mensaje)
